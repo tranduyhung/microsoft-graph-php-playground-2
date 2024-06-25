@@ -86,10 +86,12 @@ function setUserDisplayName() {
 
     $newDisplayName = readline('');
 
+    echo 'Please wait...' . PHP_EOL;
+
     try {
         $user = $graphServiceClient->users()->byUserId($userPrincipalName)->get()->wait();
         $user->setDisplayName($newDisplayName);
-        $user->patch($user)->wait();
+        $graphServiceClient->users()->byUserId($userPrincipalName)->patch($user)->wait();
     } catch (ApiException $e) {
         echo 'Error: ' . $e->getError()->getMessage();
         exit(0);
@@ -101,6 +103,8 @@ function setUserDisplayName() {
 function getUserRoles() {
     global $graphServiceClient;
     global $userPrincipalName;
+
+    echo 'Please wait...' . PHP_EOL;
 
     try {
         $user = $graphServiceClient->users()->byUserId($userPrincipalName)->get()->wait();
