@@ -5,8 +5,10 @@ use Microsoft\Kiota\Authentication\Oauth\ClientCredentialContext;
 use Microsoft\Kiota\Abstractions\ApiException;
 use Microsoft\Graph\GraphServiceClient;
 use Microsoft\Graph\Generated\Users\Item\UserItemRequestBuilderGetRequestConfiguration;
-
+use Microsoft\Graph\Generated\Models\AppRoleAssignment;
 use Microsoft\Graph\Core\Tasks\PageIterator;
+use Microsoft\Graph\Generated\Users\Item\AppRoleAssignments\AppRoleAssignmentsRequestBuilderGetRequestConfiguration;
+use Microsoft\Graph\Generated\ServicePrincipals\Item\ServicePrincipalItemRequestBuilderGetRequestConfiguration;
 
 $dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
 $dotenv->load();
@@ -28,6 +30,8 @@ while ($choice != 0) {
     echo '4. Get current name\'s roles' . PHP_EOL;
     echo '5. Get current name\'s contact info' . PHP_EOL;
     echo '6. Change current name\'s street address' . PHP_EOL;
+    echo '7. Get current user\'s assigned roles' . PHP_EOL;
+    echo '8. Assign current user to Test role' . PHP_EOL;
     echo PHP_EOL;
 
     $choice = (int) readline('');
@@ -52,6 +56,12 @@ while ($choice != 0) {
             break;
         case 6:
             setUserStreetAddress();
+            break;
+        case 7:
+            getUserAssignedRoles();
+            break;
+        case 8:
+            assignUserToTestRole();
             break;
         default:
             print('Goodbye...' . PHP_EOL);
@@ -190,6 +200,88 @@ function setUserStreetAddress() {
     }
 
     echo 'Current user\'s street address is now ' . $user->getDisplayName() . PHP_EOL;
+}
+
+function getUserAssignedRoles() {
+    global $graphServiceClient;
+    global $userPrincipalName;
+
+    echo 'Please wait...' . PHP_EOL;
+
+    try {
+        $resourceId = $_ENV['RESOURCE_ID'];
+        $user = $graphServiceClient->users()->byUserId($userPrincipalName)->get()->wait();
+
+        echo 'Assigned roles of ' . $user->getDisplayName() . ' in resource ' . $resourceId . ': ' . PHP_EOL . PHP_EOL;
+
+        $roles = $graphServiceClient->users()->byUserId($userPrincipalName)->appRoleAssignments()->get()->wait();
+
+        $requestConfiguration = new AppRoleAssignmentsRequestBuilderGetRequestConfiguration();
+        $queryParameters = AppRoleAssignmentsRequestBuilderGetRequestConfiguration::createQueryParameters();
+        $queryParameters->filter = 'resourceId eq ' . $resourceId;
+        $requestConfiguration->queryParameters = $queryParameters;
+
+        $roles = $graphServiceClient->users()->byUserId($userPrincipalName)->appRoleAssignments()->get($requestConfiguration)->wait();
+
+        $pageIterator = new PageIterator($roles, $graphServiceClient->getRequestAdapter());
+
+        $assignedAppRoleIds = [];
+
+        $callback = function (AppRoleAssignment $assignment) use (&$assignedAppRoleIds) {
+            $assignedAppRoleIds[] = $assignment->getAppRoleId();
+        };
+
+        while ($pageIterator->hasNext()) {
+            $pageIterator->iterate($callback);
+        }
+
+        $requestConfiguration = new ServicePrincipalItemRequestBuilderGetRequestConfiguration();
+        $queryParameters = ServicePrincipalItemRequestBuilderGetRequestConfiguration::createQueryParameters();
+        $queryParameters->select = ['appRoles'];
+        $requestConfiguration->queryParameters = $queryParameters;
+
+        /** @var Microsoft\Graph\Generated\Models\ServicePrincipal $resource */
+        $resource = $graphServiceClient->servicePrincipals()->byServicePrincipalId($resourceId)->get($requestConfiguration)->wait();
+        $resourceAppRoles = $resource->getAppRoles();
+
+        foreach ($assignedAppRoleIds as $assignedAppRoleId) {
+            foreach ($resourceAppRoles as $role) {
+                if ($assignedAppRoleId == $role->getId()) {
+                    echo $role->getDisplayName() . PHP_EOL;
+                }
+            }
+        }
+    } catch (ApiException $e) {
+        echo 'Error: ' . $e->getError()->getMessage();
+        exit(0);
+    }
+}
+
+function assignUserToTestRole() {
+    global $graphServiceClient;
+    global $userPrincipalName;
+
+    echo 'Please wait...' . PHP_EOL;
+
+    try {
+        /** @var Microsoft\Graph\Generated\Models\User $user */
+        $user = $graphServiceClient->users()->byUserId($userPrincipalName)->get()->wait();
+        $userId = $user->getId();
+
+        echo "Current user's ID is $userId" . PHP_EOL;
+
+        $requestBody = new AppRoleAssignment();
+        $requestBody->setPrincipalId($userId);
+        $requestBody->setResourceId($_ENV['RESOURCE_ID']);
+        $requestBody->setAppRoleId($_ENV['TEST_ROLE_ID']);
+
+        $result = $graphServiceClient->users()->byUserId($userPrincipalName)->appRoleAssignments()->post($requestBody)->wait();
+    } catch (ApiException $e) {
+        echo 'Error: ' . $e->getError()->getMessage();
+        exit(0);
+    }
+
+    echo "Current user has been added to app role ID " . $_ENV['TEST_ROLE_ID'] . PHP_EOL;
 }
 
 function getGraphServiceClient() {
